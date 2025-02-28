@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-21">
+		<attributes>
+			<attribute name="module" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="src" path="src"/>
+	<classpathentry kind="lib" path="/home/andrelcol/Downloads/soot-4.6.0/target/sootclasses-trunk.jar"/>
+	<classpathentry kind="lib" path="/home/andrelcol/Downloads/slf4j-v_2.0.17/slf4j-simple/target/slf4j-simple-2.0.17.jar"/>
+	<classpathentry kind="lib" path="/home/andrelcol/Downloads/slf4j-v_2.0.17/slf4j-api/target/slf4j-api-2.0.17.jar"/>
+	<classpathentry kind="lib" path="/home/andrelcol/Downloads/guava-33.4.0-jre.jar"/>
+	<classpathentry kind="lib" path="/home/andrelcol/Downloads/asm-9.7.jar"/>
+	<classpathentry kind="lib" path="/home/andrelcol/Downloads/asm-commons-9.7.jar"/>
+	<classpathentry kind="lib" path="/home/andrelcol/Downloads/asm-tree-9.7.jar"/>
+	<classpathentry kind="lib" path="/home/andrelcol/Downloads/failureaccess-1.0.2.jar"/>
+	<classpathentry kind="lib" path="/home/andrelcol/Downloads/heros-1.2.3.jar"/>
+	<classpathentry kind="output" path="bin"/>
+</classpath>
