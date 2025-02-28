@@ -1,0 +1,275 @@
+[comment encoding = UTF-8 /]
+[module heuristicReport('http://www.eclipse.org/emf/2002/Ecore')]
+
+[comment 
+===============================================================================
+  Módulo: heuristicReport
+  Descrição:
+  - Aplica as 6 heurísticas (H1..H6) sobre o modelo RootAST.
+  - Integra dados de AST (JavaParser), Call Graph (Soot) e bibliotecas 
+    (OWASP Dependency-Check).
+===============================================================================
+/]
+
+[comment -- Imports básicos para usar coleções Java se necessário --]
+[import java::util::* /]
+
+[comment -- --------------------------------------------------------------------
+    EXEMPLO DE SERVIÇO PARA OWASP DEPENDENCY-CHECK
+    (Na prática, você usaria a engine real da lib. Este é só um mock didático.)
+   -------------------------------------------------------------------- --]
+[service class org.owasp.dependencycheck.Engine]
+    [constructor public Engine() /]
+    [method public scan(): void /]
+    [method public getDependencies(): List<Dependency> /]
+[/service]
+
+[comment -- Supondo que "Dependency" tenha algo tipo:
+    - name : String
+    - version : String
+    - vulnerabilities : List<String>
+   É só ilustrativo.
+--]
+
+[comment 
+===============================================================================
+  TEMPLATE PRINCIPAL
+  Este template gera um arquivo "security_report.txt" chamando as heurísticas.
+===============================================================================
+/]
+[template public generateSecurityReport(root : com::analise::seguranca::model::RootAST)]
+[file ('security_report.txt', false, 'UTF-8')]
+
+Security Debt Analysis Report
+============================
+Projeto: [root.projectName/]
+Data: [new Date()/]
+
+[comment -- Opcional: Inicia a engine do Dependency-Check, se quiser rodar localmente --]
+[let owasp : Engine = new Engine()]
+[owasp.scan()]
+
+[comment -- Chama cada heurística, que fará seu loop interno no AST ou bibliotecas --]
+[detectHardcodedCredentials(root, owasp)/]
+[detectInsecureComms(root)/]
+[detectPrivilegeDeficiency(root)/]
+[detectOutdatedLibraries(root, owasp)/]
+[detectUnvalidatedInput(root)/]
+[detectLackOfLogging(root)/]
+
+[/file]
+[/template]
+
+[comment
+===============================================================================
+  H1: Hardcoded Credentials
+===============================================================================
+--]
+[template private detectHardcodedCredentials(root : com::analise::seguranca::model::RootAST, engine : Engine)]
+[comment 
+  - Localiza literais que correspondam a regex de credenciais (pwd, token, etc.).
+  - Verifica entropia (cálculo simplificado).
+  - Verifica se, no Call Graph, esse valor pode chegar a funções críticas 
+    (ex.: login, dbConnect, etc.).
+/]
+
+[for (node : com::analise::seguranca::model::ASTNode |
+   root.astNodes->select(n | n.type = 'StringLiteral'))]
+
+  [let txt : String = node.stringValue.toLowerCase()]
+  [if (txt.matches('.*(password|passwd|pwd|secret|api[_-]?key|token).*'))]
+    [let ent : Real = calculateShannonEntropy(node.stringValue)]
+    [if (ent >= 3.5)]  [comment 3.5 é exemplo de threshold /]
+== H1 Violation (Hardcoded Credentials) ==
+Local: [node.location/]
+Valor: "[node.stringValue/]"
+Entropia: [ent.format('%#.2f')/]
+
+    [/if]
+  [/let]
+[/if]
+[/for]
+[/template]
+
+[comment
+===============================================================================
+  H2: Insecure Communications
+===============================================================================
+--]
+[template private detectInsecureComms(root : com::analise::seguranca::model::RootAST)]
+[comment 
+  - Localiza uso de "http://" ou sockets sem TLS,
+    ou configurações SSL inseguras.
+  - Exemplo simplificado, procurando "http://" em literais ou method calls.
+/]
+[for (node : com::analise::seguranca::model::ASTNode | root.astNodes)]
+  [if (node.type = 'StringLiteral' and node.stringValue.startsWith('http://'))]
+== H2 Violation (Insecure Communication) ==
+Local: [node.location/]
+Uso de protocolo não seguro: [node.stringValue/]
+
+  [/if]
+[/for]
+[/template]
+
+[comment
+===============================================================================
+  H3: Privilege Separation Deficiency
+===============================================================================
+--]
+[template private detectPrivilegeDeficiency(root : com::analise::seguranca::model::RootAST)]
+[comment 
+  - Exemplo: Checar métodos suspeitos que não tenham anotações de segurança,
+    ou que apareçam no call graph como críticos mas sem checagem de auth.
+  - Aqui faremos algo simples: se no nome do método tiver "deleteUser" ou "admin" 
+    e não houver log de "checkPermission".
+/]
+[for (node : com::analise::seguranca::model::ASTNode | 
+      root.astNodes->select(n | n.type = 'MethodDecl'))]
+
+  [if ((node.name.toLowerCase().contains('deleteuser') 
+         or node.name.toLowerCase().contains('admin'))
+       and not methodHasAuthCheck(node))]
+== H3 Violation (Privilege Separation Deficiency) ==
+Método crítico sem verificação de privilégio: [node.name/]
+Local: [node.location/]
+
+  [/if]
+[/for]
+[/template]
+
+[comment
+===============================================================================
+  H4: Outdated or Vulnerable Libraries
+===============================================================================
+--]
+[template private detectOutdatedLibraries(root : com::analise::seguranca::model::RootAST, engine : Engine)]
+[comment 
+  - Compara root.libraries com as do engine do OWASP.
+  - Se encontrar CVEs, reporta.
+/]
+[for (lib : com::analise::seguranca::model::LibraryDependency | root.libraries)]
+  [let matching : List<Dependency> = engine.getDependencies()
+       ->select(d | d.name = lib.name and d.version = lib.version)]
+  [if (not matching->isEmpty())]
+    [for (dep : matching)]
+      [if (not dep.vulnerabilities->isEmpty())]
+== H4 Violation (Vulnerable Library) ==
+Biblioteca: [dep.name/]@[dep.version/]
+Vulnerabilidades:
+[for (vuln : dep.vulnerabilities)]
+ * [vuln/]
+[/for]
+
+      [/if]
+    [/for]
+  [/if]
+[/for]
+[/template]
+
+[comment
+===============================================================================
+  H5: Unvalidated Sensor/External Input
+===============================================================================
+--]
+[template private detectUnvalidatedInput(root : com::analise::seguranca::model::RootAST)]
+[comment 
+  - Exemplo: Se o node for "MethodDecl" contendo "readSensor" 
+    e o método não chama "validateInput" etc.
+  - 100% fictício, mas você pode estender a lógica.
+/]
+[for (node : com::analise::seguranca::model::ASTNode | 
+      root.astNodes->select(n | n.type = 'MethodDecl'))]
+
+  [if (node.name.toLowerCase().contains('readsensor')
+       or node.name.toLowerCase().contains('requestparam'))]
+    [if (not methodHasValidation(node))]
+== H5 Violation (Unvalidated External Input) ==
+Método: [node.name/]
+Local: [node.location/]
+
+    [/if]
+  [/if]
+[/for]
+[/template]
+
+[comment
+===============================================================================
+  H6: Lack of Logging/Audit
+===============================================================================
+--]
+[template private detectLackOfLogging(root : com::analise::seguranca::model::RootAST)]
+[comment 
+  - Exemplo: Se for um método que contém "update", "exec" ou "config" no nome,
+    mas não existe logging dentro do corpo.
+  - Precisaria de um parse mais sofisticado. Aqui é só ilustrativo.
+/]
+[for (node : com::analise::seguranca::model::ASTNode |
+      root.astNodes->select(n | n.type = 'MethodDecl'))]
+
+  [if ((node.name.toLowerCase().contains('update')
+        or node.name.toLowerCase().contains('exec')
+        or node.name.toLowerCase().contains('config'))
+       and not methodHasLogging(node))]
+== H6 Violation (Lack of Logging/Audit) ==
+Método: [node.name/]
+Local: [node.location/]
+
+  [/if]
+[/for]
+[/template]
+
+[comment
+===============================================================================
+  EXEMPLOS DE QUERIES / SERVIÇOS AUXILIARES
+===============================================================================
+--]
+
+[query public calculateShannonEntropy(s : String) : Real]
+[comment 
+  - Exemplo simples de cálculo de entropia. 
+  - Em tempo de execução, as bibliotecas do Java podem ou não estar disponíveis,
+    dependendo de como você configurou o Acceleo. 
+  - Caso não funcione, você pode fazer via Java + injetar no modelo.
+--]
+    [let freqMap : Map<Character, Integer> = s.chars().groupingBy().eachCount()]
+    [let length : Integer = s.length()]
+    [let entropy : Real = 0.0]
+    [for (entry : freqMap.entrySet())]
+        [let prob : Real = entry.value.toReal() / length.toReal()]
+        [set entropy = entropy - (prob * (Math.log(prob) / Math.log(2)))]
+    [/for]
+    [entropy/]
+[/query]
+
+[comment
+  Funções fictícias para checar se um método tem auth ou logging.
+  Na prática, você poderia extrair isso do AST real com JavaParser 
+  e armazenar no model (ex: node.hasAnnotation("Secured"), etc.).
+--]
+[query public methodHasAuthCheck(node : com::analise::seguranca::model::ASTNode) : Boolean]
+    [if (node.name.toLowerCase().contains('checkpermission') or node.name.toLowerCase().contains('secured'))]
+        [true/]
+    [else]
+        [false/]
+    [/if]
+[/query]
+
+[query public methodHasValidation(node : com::analise::seguranca::model::ASTNode) : Boolean]
+    [if (node.name.toLowerCase().contains('validate'))]
+        [true/]
+    [else]
+        [false/]
+    [/if]
+[/query]
+
+[query public methodHasLogging(node : com::analise::seguranca::model::ASTNode) : Boolean]
+    [if (node.name.toLowerCase().contains('log')
+         or node.name.toLowerCase().contains('logger')
+         or node.name.toLowerCase().contains('audit'))]
+        [true/]
+    [else]
+        [false/]
+    [/if]
+[/query]
+
